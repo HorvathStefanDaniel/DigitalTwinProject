@@ -3,7 +3,9 @@
 #include <WiFiUdp.h>
 #include <ESP32Servo.h>
 
+#define UDP_TIMER 100 //timer for udp messages
 #define SERVO_SPEED 100// servo speed in ms
+#define SEND_SENSOR_TIMER 100 //timer for sending sensor data
 #define DEBUG 0     //set to 1 to debug stuff to console
 
 // Network configuration
@@ -152,24 +154,62 @@ int getAngleC() {
     return map(potValueC, 4095, 0, -90, 90); // Reversed mapping
 }
 
+// Utility function to extract values from the received UDP string
+int getValue(const String& data, char separator) {
+    int separatorPos = data.indexOf(separator);
+    int colonPos = data.indexOf(':', separatorPos);
+    int nextSeparatorPos = data.indexOf('|', colonPos);
 
-// UDP functions (you may activate these if you need to handle incoming UDP data)
-void sendUDPDataString() {
-    Udp.beginPacket(RECEIVER_IP_ADDRESS, RECEIVER_PORT);
-    Udp.print(UDPDataString);
-    Udp.endPacket();
-    Serial.print("Sent UDP message: ");
-    Serial.println(UDPDataString);
+    return data.substring(colonPos + 1, nextSeparatorPos).toInt();
 }
 
+// Utility function to extract string values for commands
+String getValueStr(const String& data, char separator) {
+    int separatorPos = data.indexOf(separator);
+    int colonPos = data.indexOf(':', separatorPos);
+    int nextSeparatorPos = data.indexOf('|', colonPos);
+
+    return data.substring(colonPos + 1, nextSeparatorPos);
+}
+
+// Function to parse servo position commands and apply them
+void parseServoCommands(const String& msg) {
+    int posA = getValue(msg, 'A');
+    int posB = getValue(msg, 'B');
+    int posC = getValue(msg, 'C');
+    String commandD = getValueStr(msg, 'D');
+
+    arm_A_pos = posA;
+    arm_B_pos = posB;
+    arm_C_pos = posC;
+
+    arm_A.write(posA);
+    arm_B.write(posB);
+    arm_C.write(posC);
+
+    if (commandD == "left") {
+        plate.write(1600); // Assuming 1600 is the left command position
+    } else if (commandD == "right") {
+        plate.write(1400); // Assuming 1400 is the right command position
+    } else {
+        plate.write(1500); // Stop position
+    }
+}
+
+// Function to receive and parse commands for servos and handle UDP messages
 void receiveUDPMessage() {
     if (Udp.parsePacket()) {
         int length = Udp.read(UDPPacketBuffer, 255);
         if (length > 0) {
             UDPPacketBuffer[length] = 0;
-            Serial.print("Received UDP message: ");
-            Serial.println(UDPPacketBuffer);
-            // Additional message handling here
+            Serial.println("Received UDP message: " + String(UDPPacketBuffer));
+
+            // Parse the received message
+            String msg = String(UDPPacketBuffer);
+            if (msg.startsWith("Servo")) {
+                // Expected message format: "Servo|A:90|B:90|C:90|D:stop"
+                parseServoCommands(msg);
+            }
         }
     }
 }
@@ -179,6 +219,28 @@ void printServoReadings() {
 }
 void printServoTargets(){
     Serial.println("Arm_A target: " + String (arm_A_pos) + " Arm_B target: " + String (arm_B_pos) + " Arm_C target: " + String (arm_C_pos));
+}
+
+// Function to send sensor data to Unity
+void sendSensorData() {
+    int angleA = getAngleA();
+    int angleB = getAngleB();
+    int angleC = getAngleC();
+    long distance = readSonar();
+
+    String message = "Sensors|";
+    message += "A:" + String(angleA) + "|";
+    message += "B:" + String(angleB) + "|";
+    message += "C:" + String(angleC) + "|";
+    message += "Dist:" + String(distance);
+
+    Udp.beginPacket(RECEIVER_IP_ADDRESS, RECEIVER_PORT);
+    Udp.print(message);
+    Udp.endPacket();
+
+    if (DEBUG) {
+        Serial.println("Sent sensor data: " + message);
+    }
 }
 
 
@@ -235,19 +297,34 @@ void setup() {
 // Loop function
 bool doOnce = false;
 long servo_time = millis();
+long udp_time = millis();
+long send_sensor_timer = millis();
+
 void loop() {
     // Button logic
     button_logic();
+    
+    // Receive UDP messages
+    if(millis() - udp_time >= UDP_TIMER){
+        receiveUDPMessage();
+        udp_time = millis();
+    }
 
-    // UDP message handling
-    receiveUDPMessage();
+    if(millis() - send_sensor_timer >= SEND_SENSOR_TIMER){
+        sendSensorData();
+        send_sensor_timer = millis();
+    }
+    
 
-    // Servo cycle
+    // Servo cycle. This just moves the sero to the target positions at a fixed speed. 
+    //Something went wrong with the servos or the wiring, so a compensation for reading and writing is added.
     if ((millis()-servo_time) >= SERVO_SPEED) {
         if (DEBUG == 1){
             printServoReadings();
             printServoTargets();
         }
+
+
         
         servo_time = millis(); // save time reference for next position update
 
