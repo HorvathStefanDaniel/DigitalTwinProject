@@ -3,22 +3,36 @@
 #include <WiFiUdp.h>
 #include <ESP32Servo.h>
 
-#define SERVO_SPEED 10// servo speed in ms
+#define SERVO_SPEED 100// servo speed in ms
 
 // Network configuration
 constexpr char SSID_NAME[] = "StefanIOT";
 constexpr char SSID_PASSWORD[] = "stefaniot";
 
 //Default positions for the joints
-int arm_A_pos = 0;   // desired angle for front left leg
-int arm_B_pos = 0;  // desired angle for front right leg
-int arm_C_pos = 0;    // desired angle for rear left leg
+int arm_A_pos = 90;   // desired angle for front left leg
+int arm_B_pos = 90;  // desired angle for front right leg
+int arm_C_pos = 90;    // desired angle for rear left leg
 
 // Servo pin definitions
 #define servo_A 2
 #define servo_B 4
 #define servo_C 25
 #define servo_D 32
+
+#define pot_A 33
+#define pot_B 34
+#define pot_C 35
+
+//sensor pins
+#define trig 26
+#define echo 27
+
+// Button pin
+#define BUTTON_PIN 0
+
+//servo correction value
+#define SERVO_CORRECTION 2
 
 // Servo objects
 Servo arm_A;        //180 is towards the plate, 0 is away from the plate
@@ -28,25 +42,16 @@ Servo plate;
 
 bool servoPosCheck()
 {
-    if (arm_A_pos != arm_A.read()) return false;
-    if (arm_B_pos != arm_B.read()) return false;
-    if (arm_C_pos != arm_C.read()) return false;
+    int arm_a_temp = arm_A.read() ;
+    int arm_b_temp = arm_B.read() ;
+    int arm_c_temp = arm_C.read() ;
+
+    if (arm_A_pos != arm_a_temp ) return false;
+    if (arm_B_pos != arm_b_temp ) return false;
+    if (arm_C_pos != arm_c_temp ) return false;
+
     return true;
 }
-
-// top, middle, base
-void setServoPos(int armAPos, int armBPos, int armCPos)
-{
-    arm_A_pos = armAPos;
-    arm_B_pos = armBPos;
-    arm_C_pos = armCPos;
-
-    //for testing
-    arm_A.write(arm_A_pos);
-    arm_B.write(arm_B_pos);
-    arm_C.write(arm_C_pos);
-}
-
 
 // UDP communication
 WiFiUDP Udp;
@@ -64,12 +69,13 @@ long lastActuatorCycle = 0;
 long printMilis = 0;
 
 // Potentiometer input
-constexpr int potentiometerPin = 33;
 int potentiometerValue = 0;
 
 // LED output
 constexpr int LEDPin = 23;
 int LEDValue = 0;
+
+bool currentButtonState;
 
 void setup() {
     Serial.begin(9600);
@@ -86,8 +92,14 @@ void setup() {
     Udp.begin(LOCAL_PORT);
     Serial.println("UDP Started");
 
-    pinMode(potentiometerPin, INPUT);
-    pinMode(LEDPin, OUTPUT);
+    // Set up the potentiometer pins
+    pinMode(pot_A, INPUT);
+    pinMode(pot_B, INPUT);
+    pinMode(pot_C, INPUT);
+
+    //echolocator
+    pinMode(trig, OUTPUT);
+    pinMode(echo, INPUT);
 
     // Allow allocation of all timers
     ESP32PWM::allocateTimer(0);
@@ -108,16 +120,112 @@ void setup() {
     arm_C.write(90);
     plate.write(1500);  //500 clockwise, 2500 counter-clockwise, 1500 stop
 
+    // Set up the button pin
+    currentButtonState = digitalRead(BUTTON_PIN);
+
     delay(5000); // Ensure servos have time to move to initial position
 }
 
-int test_pos = 1;
+
+long readSonar() {
+    digitalWrite(trig, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trig, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trig, LOW);
+    long duration = pulseIn(echo, HIGH);
+    long distance = duration * 0.034 / 2; // Speed of sound wave divided by 2 (go and return)
+    return distance;    // in cm
+}
 
 
 static unsigned long servo_time = millis();
+// Button state management
+bool lastButtonState = HIGH;  // Assume button starts unpressed
+bool servosAttached = true;   // Assume servos start attached
+
+void button_logic() {
+    currentButtonState = digitalRead(BUTTON_PIN);  // Read the current button state
+    if (currentButtonState == LOW && lastButtonState == HIGH) {
+        // Button was pressed
+        if (servosAttached) {
+            // Detach servos
+            arm_A.detach();
+            arm_B.detach();
+            arm_C.detach();
+            plate.detach();
+            servosAttached = false;
+            Serial.println("Servos detached");
+        } else {
+            // Attach servos
+            arm_A.attach(servo_A, 500, 2500);
+            arm_B.attach(servo_B, 500, 2500);
+            arm_C.attach(servo_C, 500, 2500);
+            plate.attach(servo_D, 500, 2500);
+            servosAttached = true;
+            Serial.println("Servos attached");
+            arm_A.write(90);
+            arm_B.write(90);
+            arm_C.write(90);
+            plate.write(1500);
+        }
+        delay(1000);  // Debounce
+    }
+    lastButtonState = currentButtonState;  // Update the last button state
+}
+
+void set_servos_to_angle(int target_A, int target_B, int target_C) {
+    arm_A_pos = target_A;
+    arm_B_pos = target_B;
+    arm_C_pos = target_C;
+}
+
+
+int test_pos = 1;
+
 void loop() {
-    arm_A.write(90);
-    delay(1000);
+    button_logic();
+    
+    //if target is reached
+    if (servoPosCheck() && test_pos == 1) {
+        Serial.println("Servos reached target 1");
+        set_servos_to_angle(100, 100, 100);
+        test_pos = 2;
+    }
+    if (servoPosCheck() && test_pos == 2) {
+        Serial.println("Servos reached target 2");
+        set_servos_to_angle(80, 80, 80);
+        test_pos = 1;
+    }
+
+
+    int potValueA = analogRead(pot_A);
+    int potValueB = analogRead(pot_B);
+    int potValueC = analogRead(pot_C);
+
+    // Map potentiometer values to angles based on custom ranges
+    int currentAngleA = map(potValueA, 3567, 193, -90, 90); // Reversed mapping
+    int currentAngleB = map(potValueB, 455, 4095, -45, 120); // Extended range mapping
+    int currentAngleC = map(potValueC, 4095, 0, -90, 90); // Reversed mapping
+
+    // print angles
+    Serial.println("Potentiometer A: " + String(currentAngleA));
+    Serial.println("Potentiometer B: " + String(currentAngleB));
+    Serial.println("Potentiometer C: " + String(currentAngleC));
+
+    // Incrementally move each servo towards the target angle
+    if (arm_A.read() < arm_A_pos) arm_A.write(arm_A.read() + 1);
+    else if (arm_A.read() > arm_A_pos) arm_A.write(arm_A.read() - 1);
+
+    if (arm_B.read() < arm_B_pos) arm_B.write(arm_B.read() + 1);
+    else if (arm_B.read() > arm_B_pos) arm_B.write(arm_B.read() - 1);
+
+    if (arm_C.read() < arm_C_pos) arm_C.write(arm_B.read() + 1);
+    else if (arm_C.read() > arm_C_pos) arm_C.write(arm_B.read() - 1);
+
+    delay(SERVO_SPEED);
+
+    delay(500);
 }
 
 // UDP functions (you may activate these if you need to handle incoming UDP data)
