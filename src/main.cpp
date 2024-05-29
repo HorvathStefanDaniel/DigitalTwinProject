@@ -35,12 +35,12 @@ int arm_C_pos = 90;    // desired angle for rear left leg
 #define BUTTON_PIN 0
 
 //servo correction value
-#define SERVO_CORRECTION 2
+#define SERVO_CORRECTION 1
 
 // Supersampling for potentiometer readings
 constexpr int POT_SAMPLES = 64;
 
-// Function to read from a servo with compensation
+// Function to read from a servo with compensation. 
 int readServoCompensated(Servo& servo) {
     int rawRead = servo.read();  // Get the raw reading
     int compensatedRead = rawRead + SERVO_CORRECTION;  // Add compensation to the read value
@@ -52,6 +52,24 @@ Servo arm_A;        //180 is towards the plate, 0 is away from the plate
 Servo arm_B;        
 Servo arm_C;        //180 is towards the plate, 0 is away from the plate
 Servo plate;        // takes 2.2 seconds for a full rotation
+
+// Function to attach all servos
+void attach_servos() {
+    arm_A.attach(servo_A);
+    arm_B.attach(servo_B);
+    arm_C.attach(servo_C);
+    plate.attach(servo_D);
+    servosAttached = true;
+}
+
+// Function to detach all servos
+void detach_servos() {
+    arm_A.detach();
+    arm_B.detach();
+    arm_C.detach();
+    plate.detach();
+    servosAttached = false;
+}
 
 bool servoPosCheck()
 {
@@ -103,7 +121,7 @@ long readSonar() {
 
 // Button state management
 bool lastButtonState = HIGH;  // Assume button starts unpressed
-bool servosAttached = true;   // Assume servos start attached
+bool servosAttached = false;   // Assume servos start attached
 
 void button_logic() {
     currentButtonState = digitalRead(BUTTON_PIN);  // Read the current button state
@@ -111,27 +129,14 @@ void button_logic() {
         // Button was pressed
         if (servosAttached) {
             // Detach servos
-            arm_A.detach();
-            arm_B.detach();
-            arm_C.detach();
-            plate.detach();
-            servosAttached = false;
+            detach_servos();
             Serial.println("Servos detached");
         } else {
             // Attach servos
-            arm_A.attach(servo_A);
-            arm_B.attach(servo_B);
-            arm_C.attach(servo_C);
-            plate.attach(servo_D);
-            servosAttached = true;
-            Serial.println("Servos attached");
+            attach_servos();
             //bring it back to default positions
-            arm_A.write(90);
-            arm_B.write(90);
-            arm_C.write(90);
             plate.write(1500);
         }
-        delay(1000);  // Debounce
     }
     lastButtonState = currentButtonState;  // Update the last button state
 }
@@ -300,17 +305,14 @@ void setup() {
     ESP32PWM::allocateTimer(3);
 
     // Attach the servos with a suitable pulse width range
-    arm_A.attach(servo_A, 500, 2500); 
-    arm_B.attach(servo_B, 500, 2500); 
-    arm_C.attach(servo_C, 500, 2500);  
-    plate.attach(servo_D, 500, 2500);                  //this just spins
+    attach_servos();
 
     // Initialize servo positions
     Serial.println("Setting initial servo positions");
-    arm_A.write(0);
-    arm_B.write(0);
+    arm_A.write(90);
+    arm_B.write(90);
     arm_C.write(90);
-    plate.write(2500);  //500 clockwise, 2500 counter-clockwise, 1500 stop
+    plate.write(1500);
 
     // Set up the button pin
     currentButtonState = digitalRead(BUTTON_PIN);
@@ -335,6 +337,7 @@ void loop() {
     }
 
     if(millis() - send_sensor_timer >= SEND_SENSOR_TIMER){
+        printServoReadings();
         sendSensorData();
         send_sensor_timer = millis();
     }
@@ -347,16 +350,13 @@ void loop() {
             printServoReadings();
             printServoTargets();
         }
-
-
-        
         servo_time = millis(); // save time reference for next position update
 
         if (arm_A_pos > readServoCompensated(arm_A)){
             arm_A.write(readServoCompensated(arm_A) + 1);
         }
         else if (arm_A_pos < readServoCompensated(arm_A)){
-            arm_A.write(readServoCompensated(arm_A) - 2);
+            arm_A.write(readServoCompensated(arm_A) - 1);
         } 
 
         if (arm_B_pos > readServoCompensated(arm_B)) arm_B.write(readServoCompensated(arm_B) + 1);
