@@ -3,8 +3,15 @@
 #include <WiFiUdp.h>
 #include <ESP32Servo.h>
 
+//plate spin values
+#define PLATE_SPIN_STOP 1500
+#define PLATE_SPIN_MAX 2500
+#define PLATE_SPIN_MIN 1550
+#define TIME_PER_DEGREE 4.16524 //ms per degree aproximation. Should use sensors for accurate tracking
+#define TIME_PER_DEGREE_SLOW 16.61 //ms per degree aproximation when using the slowest speed.
+
 #define UDP_TIMER 100 //timer for udp messages
-#define SERVO_SPEED 100// servo speed in ms
+#define SERVO_SPEED 5// servo speed in ms
 #define SEND_SENSOR_TIMER 100 //timer for sending sensor data
 #define DEBUG 0     //set to 1 to debug stuff to console
 
@@ -13,9 +20,10 @@ constexpr char SSID_NAME[] = "StefanIOT";
 constexpr char SSID_PASSWORD[] = "stefaniot";
 
 //Default positions for the joints
-int arm_A_pos = 90;   // desired angle for front left leg
-int arm_B_pos = 90;  // desired angle for front right leg
-int arm_C_pos = 90;    // desired angle for rear left leg
+int arm_A_pos = 90;   // desired angle for A
+int arm_B_pos = 90;  // desired angle for B
+int arm_C_pos = 90;    // desired angle for C
+int plate_pos = 0;    // desired angle for plate
 
 // Button state management
 bool lastButtonState = HIGH;  // Assume button starts unpressed
@@ -92,12 +100,7 @@ bool servoPosCheck()
     return true;
 }
 
-//at 2500 it takes 2200 ms for a full rotation. So 1.1 ms per degree
-int plate_angle_check(){
-    long rotation_time = millis() % 2200;
-    int angle = map(rotation_time, 0, 2200, 0, 360);
-    return angle;
-}
+
 
 // UDP communication
 WiFiUDP Udp;
@@ -189,6 +192,14 @@ int getAngleC() {
     return map(potValueC, 4095, 0, -90, 90); // Reversed mapping
 }
 
+//assuming the plate starts rotating from the start
+int getAnglePlate(){
+    //long rotation_time = millis() % 2200;
+    long rotation_time = millis() % 5980;   //for slow rotation speed
+    int angle = map(rotation_time, 0, 5980, 0, 360);
+    return angle;
+}
+
 // Utility function to extract values from the received UDP string
 int getValue(const String& data, char separator) {
     int separatorPos = data.indexOf(separator);
@@ -278,6 +289,22 @@ void sendSensorData() {
     }
 }
 
+//increment plate agle by value; isn't very accurate because of spin up time
+void incrementPlateAngle(int value){
+    plate_pos = plate_pos % 360;    //keep the value between 0 and 360
+    int current_angle = plate_pos;
+    plate_pos += value;
+    // Check bounds and mechanical limits here if necessary
+
+    float time = abs(plate_pos - current_angle) * TIME_PER_DEGREE_SLOW;
+
+    unsigned long start_time = millis();
+    plate.write(PLATE_SPIN_MIN);
+    while (millis() - start_time < (unsigned long)round(time)){
+    }
+    plate.write(PLATE_SPIN_STOP);
+}
+
 
 // Setup function
 void setup() {
@@ -319,7 +346,7 @@ void setup() {
     arm_A.write(90);
     arm_B.write(90);
     arm_C.write(90);
-    plate.write(1500);
+    plate.write(PLATE_SPIN_MIN);
 
     // Set up the button pin
     currentButtonState = digitalRead(BUTTON_PIN);
@@ -336,7 +363,7 @@ long send_sensor_timer = millis();
 void loop() {
     // Button logic
     button_logic();
-    
+    //incrementPlateAngle(90);
     // Receive UDP messages
     if(millis() - udp_time >= UDP_TIMER){
         receiveUDPMessage();
@@ -344,15 +371,26 @@ void loop() {
     }
 
     if(millis() - send_sensor_timer >= SEND_SENSOR_TIMER){
+        send_sensor_timer = millis();
         printServoReadings();
         sendSensorData();
-        send_sensor_timer = millis();
     }
     
 
     // Servo cycle. This just moves the sero to the target positions at a fixed speed. 
     //Something went wrong with the servos or the wiring, so a compensation for reading and writing is added.
     if ((millis()-servo_time) >= SERVO_SPEED) {
+
+        int plate_angle = getAnglePlate();
+        Serial.println("Plate angle: " + String(plate_angle));
+
+        if(plate_angle >= 180){
+            plate.write(1500);
+        }else{
+            plate.write(PLATE_SPIN_MIN);
+        }
+
+
         if (DEBUG == 1){
             printServoReadings();
             printServoTargets();
