@@ -70,7 +70,6 @@ void attach_servos() {
     arm_A.attach(servo_A);
     arm_B.attach(servo_B);
     arm_C.attach(servo_C);
-    plate.attach(servo_D);
     servosAttached = true;
 }
 
@@ -79,7 +78,6 @@ void detach_servos() {
     arm_A.detach();
     arm_B.detach();
     arm_C.detach();
-    plate.detach();
     servosAttached = false;
 }
 
@@ -144,8 +142,9 @@ void button_logic() {
         } else {
             // Attach servos
             attach_servos();
-            //bring it back to default positions
-            plate.write(1500);
+            // Plate servo separate because it should always spin
+            plate.attach(servo_D);
+
         }
     }
     lastButtonState = currentButtonState;  // Update the last button state
@@ -233,12 +232,12 @@ void parseServoCommands(const String& msg) {
     arm_B.write(posB);
     arm_C.write(posC);
 
-    if (commandD == "left") {
-        plate.write(1600); // Assuming 1600 is the left command position
-    } else if (commandD == "right") {
-        plate.write(1400); // Assuming 1400 is the right command position
+    if (commandD == "start") {
+        plate.write(PLATE_SPIN_MIN);
+    } else if (commandD == "start_fast") {
+        plate.write(PLATE_SPIN_MAX);
     } else {
-        plate.write(1500); // Stop position
+        plate.write(PLATE_SPIN_STOP);
     }
 }
 
@@ -272,12 +271,14 @@ void sendSensorData() {
     int angleA = getAngleA();
     int angleB = getAngleB();
     int angleC = getAngleC();
+    int angle_plate = getAnglePlate();
     long distance = readSonar();
 
     String message = "Sensors|";
     message += "A:" + String(angleA) + "|";
     message += "B:" + String(angleB) + "|";
     message += "C:" + String(angleC) + "|";
+    message += "Plate:" + String(angle_plate) + "|";
     message += "Dist:" + String(distance);
 
     Udp.beginPacket(RECEIVER_IP_ADDRESS, RECEIVER_PORT);
@@ -289,7 +290,7 @@ void sendSensorData() {
     }
 }
 
-//increment plate agle by value; isn't very accurate because of spin up time
+//increment plate agle by value; isn't very accurate because of spin up time. Won't use as it is now.
 void incrementPlateAngle(int value){
     plate_pos = plate_pos % 360;    //keep the value between 0 and 360
     int current_angle = plate_pos;
@@ -383,13 +384,6 @@ void loop() {
 
         int plate_angle = getAnglePlate();
         Serial.println("Plate angle: " + String(plate_angle));
-
-        if(plate_angle >= 180){
-            plate.write(1500);
-        }else{
-            plate.write(PLATE_SPIN_MIN);
-        }
-
 
         if (DEBUG == 1){
             printServoReadings();
