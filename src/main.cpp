@@ -49,7 +49,7 @@ int readServoCompensated(Servo& servo) {
 Servo arm_A;        //180 is towards the plate, 0 is away from the plate
 Servo arm_B;        
 Servo arm_C;        //180 is towards the plate, 0 is away from the plate
-Servo plate;
+Servo plate;        // takes 2.2 seconds for a full rotation
 
 bool servoPosCheck()
 {
@@ -112,6 +112,7 @@ void button_logic() {
             arm_A.detach();
             arm_B.detach();
             arm_C.detach();
+            plate.detach();
             servosAttached = false;
             Serial.println("Servos detached");
         } else {
@@ -119,6 +120,7 @@ void button_logic() {
             arm_A.attach(servo_A);
             arm_B.attach(servo_B);
             arm_C.attach(servo_C);
+            plate.attach(servo_D);
             servosAttached = true;
             Serial.println("Servos attached");
             //bring it back to default positions
@@ -253,6 +255,7 @@ void setup() {
         Serial.println(SSID_NAME);
         delay(1000);
     }
+
     Serial.println("Connected to WiFi");
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
@@ -284,9 +287,9 @@ void setup() {
     // Initialize servo positions
     Serial.println("Setting initial servo positions");
     arm_A.write(0);
-    arm_B.write(90);
+    arm_B.write(0);
     arm_C.write(90);
-    plate.write(1500);  //500 clockwise, 2500 counter-clockwise, 1500 stop
+    plate.write(2500);  //500 clockwise, 2500 counter-clockwise, 1500 stop
 
     // Set up the button pin
     currentButtonState = digitalRead(BUTTON_PIN);
