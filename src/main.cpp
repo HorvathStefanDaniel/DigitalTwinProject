@@ -17,6 +17,10 @@ int arm_A_pos = 90;   // desired angle for front left leg
 int arm_B_pos = 90;  // desired angle for front right leg
 int arm_C_pos = 90;    // desired angle for rear left leg
 
+// Button state management
+bool lastButtonState = HIGH;  // Assume button starts unpressed
+bool servosAttached = false;   // Assume servos start attached
+
 // Servo pin definitions
 #define servo_A 2
 #define servo_B 4
@@ -118,10 +122,6 @@ long readSonar() {
     long distance = duration * 0.034 / 2; // Speed of sound wave divided by 2 (go and return)
     return distance;    // in cm
 }
-
-// Button state management
-bool lastButtonState = HIGH;  // Assume button starts unpressed
-bool servosAttached = false;   // Assume servos start attached
 
 void button_logic() {
     currentButtonState = digitalRead(BUTTON_PIN);  // Read the current button state
