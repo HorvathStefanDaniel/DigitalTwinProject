@@ -92,6 +92,13 @@ bool servoPosCheck()
     return true;
 }
 
+//at 2500 it takes 2200 ms for a full rotation. So 1.1 ms per degree
+int plate_angle_check(){
+    long rotation_time = millis() % 2200;
+    int angle = map(rotation_time, 0, 2200, 0, 360);
+    return angle;
+}
+
 // UDP communication
 WiFiUDP Udp;
 IPAddress RECEIVER_IP_ADDRESS(192, 168, 87, 175);
