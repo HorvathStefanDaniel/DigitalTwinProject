@@ -37,6 +37,8 @@ int arm_C_pos = 90;    // desired angle for rear left leg
 //servo correction value
 #define SERVO_CORRECTION 2
 
+// Supersampling for potentiometer readings
+constexpr int POT_SAMPLES = 64;
 
 // Function to read from a servo with compensation
 int readServoCompensated(Servo& servo) {
@@ -141,17 +143,36 @@ void set_servos_to_angle(int target_A, int target_B, int target_C) {
 }
 
 int getAngleA() {
-    int potValueA = analogRead(pot_A);
+    // Supersampling to reduce noise
+    int potValueA = 0;
+    for (int i = 0; i < POT_SAMPLES; i++) {
+        potValueA += analogRead(pot_A);
+    }
+    potValueA /= POT_SAMPLES;
+
     // Map potentiometer values to angles based on custom ranges
     return map(potValueA, 3567, 193, -90, 90); // Reversed mapping
 }
+
 int getAngleB() {
-    int potValueB = analogRead(pot_B);
+    // Supersampling to reduce noise
+    int potValueB = 0;
+    for (int i = 0; i < POT_SAMPLES; i++) {
+        potValueB += analogRead(pot_B);
+    }
+    potValueB /= POT_SAMPLES;
+
     // Map potentiometer values to angles based on custom ranges
     return map(potValueB, 455, 4095, -45, 120); // Extended range mapping
 }
 int getAngleC() {
-    int potValueC = analogRead(pot_C);
+    // Supersampling to reduce noise
+    int potValueC = 0;
+    for (int i = 0; i < POT_SAMPLES; i++) {
+        potValueC += analogRead(pot_C);
+    }
+    potValueC /= POT_SAMPLES;
+
     // Map potentiometer values to angles based on custom ranges
     return map(potValueC, 4095, 0, -90, 90); // Reversed mapping
 }
@@ -345,4 +366,3 @@ void loop() {
         else if (arm_C_pos < readServoCompensated(arm_C)) arm_C.write(readServoCompensated(arm_C) - 2);
   }
 }
-
