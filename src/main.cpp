@@ -102,7 +102,7 @@ bool servoPosCheck()
 
 // UDP communication
 WiFiUDP Udp;
-IPAddress RECEIVER_IP_ADDRESS(192, 168, 87, 175);
+IPAddress RECEIVER_IP_ADDRESS(192, 168, 1, 93);       //192.168.1.93 
 constexpr int RECEIVER_PORT = 50195;
 constexpr int LOCAL_PORT = 3002;
 String UDPDataString = "";
@@ -142,9 +142,6 @@ void button_logic() {
         } else {
             // Attach servos
             attach_servos();
-            // Plate servo separate because it should always spin
-            plate.attach(servo_D);
-
         }
     }
     lastButtonState = currentButtonState;  // Update the last button state
@@ -341,7 +338,8 @@ void setup() {
 
     // Attach the servos with a suitable pulse width range
     attach_servos();
-
+    // Plate servo separate because it should always spin
+    plate.attach(servo_D);
     // Initialize servo positions
     Serial.println("Setting initial servo positions");
     arm_A.write(90);
@@ -373,7 +371,6 @@ void loop() {
 
     if(millis() - send_sensor_timer >= SEND_SENSOR_TIMER){
         send_sensor_timer = millis();
-        printServoReadings();
         sendSensorData();
     }
     
@@ -382,12 +379,10 @@ void loop() {
     //Something went wrong with the servos or the wiring, so a compensation for reading and writing is added.
     if ((millis()-servo_time) >= SERVO_SPEED) {
 
-        int plate_angle = getAnglePlate();
-        Serial.println("Plate angle: " + String(plate_angle));
-
         if (DEBUG == 1){
             printServoReadings();
             printServoTargets();
+            Serial.println("Plate angle: " + String(getAnglePlate()));
         }
         servo_time = millis(); // save time reference for next position update
 
