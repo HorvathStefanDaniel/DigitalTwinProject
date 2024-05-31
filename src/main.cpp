@@ -10,10 +10,12 @@
 #define TIME_PER_DEGREE 4.16524 //ms per degree aproximation. Should use sensors for accurate tracking
 #define TIME_PER_DEGREE_SLOW 16.61 //ms per degree aproximation when using the slowest speed.
 
-#define UDP_TIMER 100 //timer for udp messages
-#define SERVO_SPEED 5// servo speed in ms
+#define UDP_TIMER 10 //timer for udp messages
+#define SERVO_SPEED 50// servo speed in ms
 #define SEND_SENSOR_TIMER 100 //timer for sending sensor data
 #define DEBUG 0     //set to 1 to debug stuff to console
+
+#define DEFAULT_MOVE_SPEED 1    //how many degrees to move, this thing's stopped working as intended, probably the servos went bad. Sometimes when it's at position 90, and the target is 180, trying to write the position + 1 (91) fails to move it.
 
 // Network configuration
 constexpr char SSID_NAME[] = "StefanIOT";
@@ -21,7 +23,7 @@ constexpr char SSID_PASSWORD[] = "stefaniot";
 
 //Default positions for the joints
 int arm_A_pos = 90;   // desired angle for A
-int arm_B_pos = 90;  // desired angle for B
+int arm_B_pos = 150;  // desired angle for B
 int arm_C_pos = 90;    // desired angle for C
 int plate_pos = 0;    // desired angle for plate
 
@@ -60,7 +62,7 @@ int readServoCompensated(Servo& servo) {
 }
 
 // Servo objects
-Servo arm_A;        //180 is towards the plate, 0 is away from the plate
+Servo arm_A;        //180 is towards the plate, 0 is away from the plate, this is the head servo
 Servo arm_B;        
 Servo arm_C;        //180 is towards the plate, 0 is away from the plate
 Servo plate;        // takes 2.2 seconds for a full rotation
@@ -71,6 +73,9 @@ void attach_servos() {
     arm_B.attach(servo_B);
     arm_C.attach(servo_C);
     servosAttached = true;
+    arm_A.write(arm_A_pos);
+    arm_B.write(arm_B_pos);
+    arm_C.write(arm_C_pos);
 }
 
 // Function to detach all servos
@@ -102,7 +107,7 @@ bool servoPosCheck()
 
 // UDP communication
 WiFiUDP Udp;
-IPAddress RECEIVER_IP_ADDRESS(192, 168, 1, 93);       //192.168.1.93 
+IPAddress RECEIVER_IP_ADDRESS(10, 126, 56, 116);       //192.168.1.93 10.126.56.116
 constexpr int RECEIVER_PORT = 50195;
 constexpr int LOCAL_PORT = 3002;
 String UDPDataString = "";
@@ -142,6 +147,7 @@ void button_logic() {
         } else {
             // Attach servos
             attach_servos();
+            delay(500);  // Ensure servos have time to move to initial position
         }
     }
     lastButtonState = currentButtonState;  // Update the last button state
@@ -152,6 +158,18 @@ void set_servos_to_angle(int target_A, int target_B, int target_C) {
     arm_B_pos = target_B;
     arm_C_pos = target_C;
 }
+
+/*
+
+A:0|B:14|C:8
+
+This is 0 in unity.
+
+Angled towards the plate the values are A:84 B:120 C:90
+
+Angled away from the plate the values are A: -96 B: -44 C: -90
+
+*/
 
 int getAngleA() {
     // Supersampling to reduce noise
@@ -196,14 +214,28 @@ int getAnglePlate(){
     return angle;
 }
 
-// Utility function to extract values from the received UDP string
+// Utility function to extract and round float values from the received UDP string
 int getValue(const String& data, char separator) {
     int separatorPos = data.indexOf(separator);
+    if (separatorPos == -1) {
+        return -1;
+    }
     int colonPos = data.indexOf(':', separatorPos);
     int nextSeparatorPos = data.indexOf('|', colonPos);
 
-    return data.substring(colonPos + 1, nextSeparatorPos).toInt();
+    float value = data.substring(colonPos + 1, nextSeparatorPos).toFloat();
+    int roundedValue = round(value);
+    // Cap the value between 10 and 170 to not break the robot arm
+    if (roundedValue < 10) {
+        roundedValue = 10;
+    } else if (roundedValue > 170) {
+        roundedValue = 170;
+    }
+
+
+    return roundedValue;
 }
+
 
 // Utility function to extract string values for commands
 String getValueStr(const String& data, char separator) {
@@ -221,20 +253,24 @@ void parseServoCommands(const String& msg) {
     int posC = getValue(msg, 'C');
     String commandD = getValueStr(msg, 'D');
 
-    arm_A_pos = posA;
-    arm_B_pos = posB;
-    arm_C_pos = posC;
+    set_servos_to_angle(posA, posB, posC);
 
-    arm_A.write(posA);
-    arm_B.write(posB);
-    arm_C.write(posC);
+    if(posA == -1 || posB == -1 || posC == -1){
+        //don't write
+    }else{
+        arm_A.write(posA);
+        arm_B.write(posB);
+        arm_C.write(posC);
+    }
 
     if (commandD == "start") {
         plate.write(PLATE_SPIN_MIN);
     } else if (commandD == "start_fast") {
         plate.write(PLATE_SPIN_MAX);
-    } else {
+    } else if(commandD == "stop"){
         plate.write(PLATE_SPIN_STOP);
+    } else{
+        //invalid or no command, don't care
     }
 }
 
@@ -244,7 +280,10 @@ void receiveUDPMessage() {
         int length = Udp.read(UDPPacketBuffer, 255);
         if (length > 0) {
             UDPPacketBuffer[length] = 0;
-            Serial.println("Received UDP message: " + String(UDPPacketBuffer));
+            
+            if( DEBUG == 1 ){
+                Serial.println("Received UDP message: " + String(UDPPacketBuffer));
+            }
 
             // Parse the received message
             String msg = String(UDPPacketBuffer);
@@ -285,6 +324,7 @@ void sendSensorData() {
     if (DEBUG) {
         Serial.println("Sent sensor data: " + message);
     }
+    Serial.println("Sent sensor data: " + message);
 }
 
 //increment plate agle by value; isn't very accurate because of spin up time. Won't use as it is now.
@@ -301,6 +341,88 @@ void incrementPlateAngle(int value){
     while (millis() - start_time < (unsigned long)round(time)){
     }
     plate.write(PLATE_SPIN_STOP);
+}
+
+// Loop function
+bool doOnce = false;
+long servo_time = millis();
+long udp_time = millis();
+long send_sensor_timer = millis();
+
+//faster movement
+bool moveFastA = false;
+bool moveFastB = false;
+bool moveFastC = false;
+
+void do_servo_movement(){
+    // Servo cycle. This just moves the sero to the target positions at a fixed speed. 
+    //Something went wrong with the servos or the wiring, so a compensation for reading and writing is added.
+    if ((millis()-servo_time) >= SERVO_SPEED) {
+
+        if (DEBUG == 1){
+            printServoReadings();
+            printServoTargets();
+            Serial.println("Plate angle: " + String(getAnglePlate()));
+        }
+        servo_time = millis(); // save time reference for next position update
+
+        if (arm_A_pos > readServoCompensated(arm_A)){
+            //to ensure that the servo doesn't get stuck
+            if(readServoCompensated(arm_A) % 2 == 1){
+                moveFastA = false;
+            }
+            arm_A.write(readServoCompensated(arm_A) + DEFAULT_MOVE_SPEED + (moveFastA ? 2 : 1));
+            moveFastA = true;
+        }
+        else if (arm_A_pos < readServoCompensated(arm_A)){
+            //to ensure that the servo doesn't get stuck
+            if(readServoCompensated(arm_A) % 2 == 1){
+                moveFastA = false;
+            }
+            arm_A.write(readServoCompensated(arm_A) - DEFAULT_MOVE_SPEED - (moveFastA ? 1 : 0));
+            moveFastA = true;
+        } else{
+            moveFastA = false;
+        }
+
+        if (arm_B_pos > readServoCompensated(arm_B)){
+            //to ensure that the servo doesn't get stuck
+            if(readServoCompensated(arm_B) % 2 == 1){
+                moveFastB = false;
+            }
+            arm_B.write(readServoCompensated(arm_B) + DEFAULT_MOVE_SPEED + (moveFastB ? 2 : 1));
+            moveFastB = true;
+        }
+        else if (arm_B_pos < readServoCompensated(arm_B)){
+            //to ensure that the servo doesn't get stuck
+            if(readServoCompensated(arm_B) % 2 == 1){
+                moveFastB = false;
+            }
+            arm_B.write(readServoCompensated(arm_B) - DEFAULT_MOVE_SPEED - (moveFastB ? 1 : 0));
+            moveFastB = true;
+        } else{
+            moveFastB = false;
+        }
+
+        if (arm_C_pos > readServoCompensated(arm_C)){
+            //to ensure that the servo doesn't get stuck
+            if(readServoCompensated(arm_C) % 2 == 1){
+                moveFastC = false;
+            }
+            arm_C.write(readServoCompensated(arm_C) + DEFAULT_MOVE_SPEED + (moveFastC ? 2 : 1));
+            moveFastC = true;
+        }
+        else if (arm_C_pos < readServoCompensated(arm_C)){
+            //to ensure that the servo doesn't get stuck
+            if(readServoCompensated(arm_C) % 2 == 1){
+                moveFastC = false;
+            }
+            arm_C.write(readServoCompensated(arm_C) - DEFAULT_MOVE_SPEED - (moveFastC ? 1 : 0));
+            moveFastC = true;
+        } else{
+            moveFastC = false;
+        }
+  }
 }
 
 
@@ -340,11 +462,6 @@ void setup() {
     attach_servos();
     // Plate servo separate because it should always spin
     plate.attach(servo_D);
-    // Initialize servo positions
-    Serial.println("Setting initial servo positions");
-    arm_A.write(90);
-    arm_B.write(90);
-    arm_C.write(90);
     plate.write(PLATE_SPIN_MIN);
 
     // Set up the button pin
@@ -353,11 +470,7 @@ void setup() {
     delay(500); // Ensure servos have time to move to initial position
 }
 
-// Loop function
-bool doOnce = false;
-long servo_time = millis();
-long udp_time = millis();
-long send_sensor_timer = millis();
+
 
 void loop() {
     // Button logic
@@ -373,30 +486,5 @@ void loop() {
         send_sensor_timer = millis();
         sendSensorData();
     }
-    
-
-    // Servo cycle. This just moves the sero to the target positions at a fixed speed. 
-    //Something went wrong with the servos or the wiring, so a compensation for reading and writing is added.
-    if ((millis()-servo_time) >= SERVO_SPEED) {
-
-        if (DEBUG == 1){
-            printServoReadings();
-            printServoTargets();
-            Serial.println("Plate angle: " + String(getAnglePlate()));
-        }
-        servo_time = millis(); // save time reference for next position update
-
-        if (arm_A_pos > readServoCompensated(arm_A)){
-            arm_A.write(readServoCompensated(arm_A) + 1);
-        }
-        else if (arm_A_pos < readServoCompensated(arm_A)){
-            arm_A.write(readServoCompensated(arm_A) - 1);
-        } 
-
-        if (arm_B_pos > readServoCompensated(arm_B)) arm_B.write(readServoCompensated(arm_B) + 1);
-        else if (arm_B_pos < readServoCompensated(arm_B)) arm_B.write(readServoCompensated(arm_B) - 2);
-
-        if (arm_C_pos > readServoCompensated(arm_C)) arm_C.write(readServoCompensated(arm_C) + 1);
-        else if (arm_C_pos < readServoCompensated(arm_C)) arm_C.write(readServoCompensated(arm_C) - 2);
-  }
+    //do_servo_movement();
 }
